@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Worm with Legs Following Cursor</title>
+  <style>
+    html,body{height:100%;margin:0;background:#081020;color:#e6eef8;font-family:system-ui,Roboto,Segoe UI}
+    canvas{display:block}
+    .ui{position:fixed;left:12px;top:12px;background:rgba(255,255,255,0.05);backdrop-filter:blur(6px);padding:10px;border-radius:10px;font-size:13px}
+    .ui label{display:block;margin-bottom:6px}
+    .ui input[type=range]{width:200px}
+    .small{font-size:12px;opacity:0.9;margin-top:6px}
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div class="ui">
+    <label>Segments: <span id="segVal">40</span></label>
+    <input id="segments" type="range" min="6" max="300" value="40">
+    <label>Segment length: <span id="lenVal">8</span></label>
+    <input id="seglen" type="range" min="2" max="40" value="8">
+    <label>Smoothness: <span id="smoothVal">0.18</span></label>
+    <input id="smooth" type="range" min="0" max="1" step="0.01" value="0.18">
+    <label>Body thickness: <span id="thickVal">14</span></label>
+    <input id="thickness" type="range" min="2" max="60" value="14">
+    <label>Leg length: <span id="legVal">10</span></label>
+    <input id="leglen" type="range" min="2" max="40" value="10">
+    <div class="small">Click canvas to toggle tail-fade. Space: randomize hue. P: pause.</div>
+  </div>
+
+<script>
+// Worm with legs following cursor
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let DPR = Math.max(1, window.devicePixelRatio || 1);
+function resize(){
+  canvas.width = innerWidth * DPR;
+  canvas.height = innerHeight * DPR;
+  canvas.style.width = innerWidth + 'px';
+  canvas.style.height = innerHeight + 'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize', resize);
+resize();
+
+// Controls
+const segmentsInput = document.getElementById('segments');
+const segLenInput = document.getElementById('seglen');
+const smoothInput = document.getElementById('smooth');
+const thicknessInput = document.getElementById('thickness');
+const legLenInput = document.getElementById('leglen');
+
+const segVal = document.getElementById('segVal');
+const lenVal = document.getElementById('lenVal');
+const smoothVal = document.getElementById('smoothVal');
+const thickVal = document.getElementById('thickVal');
+const legVal = document.getElementById('legVal');
+
+let tailFade = true;
+let colorHue = Math.random()*360;
+let paused = false;
+
+segmentsInput.oninput = ()=>{ segVal.textContent = segmentsInput.value; initWorm(); };
+segLenInput.oninput = ()=>{ lenVal.textContent = segLenInput.value; initWorm(); };
+smoothInput.oninput = ()=>{ smoothVal.textContent = smoothInput.value; };
+thicknessInput.oninput = ()=>{ thickVal.textContent = thicknessInput.value; };
+legLenInput.oninput = ()=>{ legVal.textContent = legLenInput.value; };
+
+canvas.addEventListener('click', ()=> tailFade = !tailFade);
+window.addEventListener('keydown', (e)=>{ if(e.code === 'Space') { colorHue = Math.random()*360; } if(e.key.toLowerCase()==='p') paused = !paused; });
+
+// Worm model: array of points
+let worm = [];
+let target = {x: innerWidth/2, y: innerHeight/2};
+let lastTime = performance.now();
+
+function initWorm(){
+  const n = Number(segmentsInput.value);
+  const segLen = Number(segLenInput.value);
+  worm = [];
+  for(let i=0;i<n;i++){
+    worm.push({x: target.x - i*segLen, y: target.y, vx:0, vy:0});
+  }
+}
+initWorm();
+
+addEventListener('pointermove', (e)=>{ target.x = e.clientX; target.y = e.clientY; });
+addEventListener('pointerdown', (e)=>{ target.x = e.clientX; target.y = e.clientY; });
+
+function step(dt){
+  if(paused) return;
+  const smooth = Number(smoothInput.value);
+  const segLen = Number(segLenInput.value);
+
+  const head = worm[0];
+  const dx = target.x - head.x;
+  const dy = target.y - head.y;
+  head.vx += dx * 0.02 * (1 - smooth);
+  head.vy += dy * 0.02 * (1 - smooth);
+  head.vx *= 0.88; head.vy *= 0.88;
+  head.x += head.vx * dt * 0.06;
+  head.y += head.vy * dt * 0.06;
+
+  for(let i=1;i<worm.length;i++){
+    const prev = worm[i-1];
+    const cur = worm[i];
+    const dxp = prev.x - cur.x;
+    const dyp = prev.y - cur.y;
+    const dist = Math.hypot(dxp,dyp) || 0.0001;
+    const diff = (dist - segLen) / dist;
+    cur.x += dxp * diff * (0.5 + smooth*0.5);
+    cur.y += dyp * diff * (0.5 + smooth*0.5);
+  }
+}
+
+function draw(){
+  if(tailFade){
+    ctx.fillStyle = 'rgba(8,16,32,0.18)';
+    ctx.fillRect(0,0,canvas.width/DPR,canvas.height/DPR);
+  } else {
+    ctx.clearRect(0,0,canvas.width/DPR,canvas.height/DPR);
+  }
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const thickness = Number(thicknessInput.value);
+  const n = worm.length;
+  const legLen = Number(legLenInput.value);
+
+  for(let i=0;i<n-1;i++){
+    const a = worm[i];
+    const b = worm[i+1];
+    const t = i / (n-1);
+    const hue = (colorHue + t*90) % 360;
+    const sat = 70 - t*40;
+    const light = 55 - t*30;
+    ctx.strokeStyle = `hsl(${hue} ${sat}% ${light}%)`;
+    ctx.lineWidth = thickness * (1 - t*0.8);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    // legs: draw small lines perpendicular to segment direction
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    const legDx = Math.cos(ang + Math.PI/2) * legLen;
+    const legDy = Math.sin(ang + Math.PI/2) * legLen;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = `hsl(${hue} ${sat+10}% ${light+10}%)`;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(a.x + legDx, a.y + legDy);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(a.x - legDx, a.y - legDy);
+    ctx.stroke();
+  }
+
+  const head = worm[0];
+  ctx.beginPath();
+  ctx.fillStyle = `hsl(${colorHue} 85% 60%)`;
+  ctx.arc(head.x, head.y, Math.max(3, thickness*0.2), 0, Math.PI*2);
+  ctx.fill();
+}
+
+function loop(t){
+  const dt = Math.min(60, t - lastTime);
+  lastTime = t;
+  step(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+window._wormLegs = {
+  get: ()=>worm,
+  setHue: (h)=>{ colorHue=h },
+  toggleFade: ()=>{ tailFade=!tailFade },
+  pause: ()=>{ paused = true },
+  play: ()=>{ paused = false }
+};
+</script>
+</body>
+</html>
